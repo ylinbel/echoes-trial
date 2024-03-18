@@ -14,6 +14,7 @@ from sklearn.metrics import r2_score
 from ._base import ESNBase
 from echoes.utils import check_model_params
 from echoes.reservoir import ReservoirLeakyNeurons
+import torch.nn
 
 
 class ESNRegressor(ESNBase, MultiOutputMixin, RegressorMixin):
@@ -193,6 +194,8 @@ class ESNRegressor(ESNBase, MultiOutputMixin, RegressorMixin):
 
         # Extend states matrix with inputs, except we only train based on states
         full_states = states if self.fit_only_states else np.hstack((states, X))
+        
+        self.full_states_ = full_states
 
         # Solve for W_out using full states and outputs, excluding transient
         self.W_out_ = self._solve_W_out(
@@ -225,6 +228,8 @@ class ESNRegressor(ESNBase, MultiOutputMixin, RegressorMixin):
         """
         check_is_fitted(self)
         X = check_array(X, dtype=self._dtype_)
+        
+        self.X_checked = X
 
         n_time_steps = X.shape[0]
 
@@ -256,45 +261,158 @@ class ESNRegressor(ESNBase, MultiOutputMixin, RegressorMixin):
 
         # Apply output non-linearity
         return self.activation_out(y_pred)
+    
 
-    def score(self, X=None, y=None, sample_weight=None) -> float:
-        """
-        R^2 (coefficient of determination) regression score function.
+    # def score(self, X=None, y=None, sample_weight=None) -> float:
+    #     """
+    #     R^2 (coefficient of determination) regression score function.
 
-        By default, the initial transient period (n_transient steps) is not considered
-        to compute the score - modify sample_weight to change that behaviour (see below).
+    #     By default, the initial transient period (n_transient steps) is not considered
+    #     to compute the score - modify sample_weight to change that behaviour (see below).
 
-        From sklearn:
-          Best possible score is 1.0 and it can be negative (because the model can be
-          arbitrarily bad).
-          A constant model that always predicts the expected value of y,
-          disregarding the input features, would get a R^2 score of 0.0.
+    #     From sklearn:
+    #       Best possible score is 1.0 and it can be negative (because the model can be
+    #       arbitrarily bad).
+    #       A constant model that always predicts the expected value of y,
+    #       disregarding the input features, would get a R^2 score of 0.0.
 
-        Arguments:
-            X: 2D np.ndarray of shape (n_samples, n_inputs)
-                Test samples.
-            y: 2D np.ndarray of shape (n_samples,) or (n_samples, n_outputs)
-                Target sequence, true values of the outputs.
-            sample_weight: array-like of shape (n_samples,), default=None
-                Sample weights.
-                If None, the transient is left out.
-                To consider all steps or leave out a different transient, pass a different
-                sample_weight array with same length as outputs 1 dimension.
-                **Usage**
-                  >> n_steps_to_remove = 10
-                  >> weights = np.ones(y_true.shape[0])
-                  >> weights[: n_steps_to_remove] = 0
-                  >> score(X, y_true, sample_weight=weights)
+    #     Arguments:
+    #         X: 2D np.ndarray of shape (n_samples, n_inputs)
+    #             Test samples.
+    #         y: 2D np.ndarray of shape (n_samples,) or (n_samples, n_outputs)
+    #             Target sequence, true values of the outputs.
+    #         sample_weight: array-like of shape (n_samples,), default=None
+    #             Sample weights.
+    #             If None, the transient is left out.
+    #             To consider all steps or leave out a different transient, pass a different
+    #             sample_weight array with same length as outputs 1 dimension.
+    #             **Usage**
+    #               >> n_steps_to_remove = 10
+    #               >> weights = np.ones(y_true.shape[0])
+    #               >> weights[: n_steps_to_remove] = 0
+    #               >> score(X, y_true, sample_weight=weights)
 
-        Returns:
-            score: float
-                R2 score
-        """
-        y_pred = self.predict(X)
-        # If no sample_weight passed, compute the score without considering transient
-        if sample_weight is None:
-            weights = np.ones(y.shape[0])
-            weights[: self.n_transient] = 0
-            return r2_score(y, y_pred, sample_weight=weights)
+    #     Returns:
+    #         score: float
+    #             R2 score
+    #     """
+    #     y_pred = self.predict(X)
+    #     # If no sample_weight passed, compute the score without considering transient
+    #     if sample_weight is None:
+    #         weights = np.ones(y.shape[0])
+    #         weights[: self.n_transient] = 0
+    #         return r2_score(y, y_pred, sample_weight=weights)
 
-        return r2_score(y, y_pred, sample_weight=sample_weight)
+    #     return r2_score(y, y_pred, sample_weight=sample_weight)
+
+
+    # def fit(self, X: torch.Tensor, y: torch.Tensor) -> "ESNRegressor":
+    #     self._dtype_ = X.dtype
+    #     if y.ndim == 1:
+    #         y = y.unsqueeze(-1)
+
+    #     # Initialize matrices and random state
+    #     self.n_inputs_ = X.size(1)
+    #     self.n_outputs_ = y.size(1)
+    #     self.n_reservoir_ = len(self.W)
+        
+    #     if self.W_in is None:
+    #         W_in = torch.rand(self.n_reservoir_, self.n_inputs_, dtype=self._dtype_, requires_grad=True)*2 - 1            
+    #     self.W_in_ = W_in
+        
+    #     if self.W is None:
+    #         W = torch.rand(self.n_reservoir_, self.n_reservoir_, dtype=self._dtype_, requires_grad=True)*2 - 1
+    #         rand_tensor = torch.rand(W.shape, device=W.device, dtype=W.dtype)
+    #         W[rand_tensor < self.sparsity] = 0
+
+    #         self.W_ = W
+                
+    #     # if not self.feedback:
+    #     #     return np.zeros((self.n_reservoir_, self.n_outputs_), dtype=self._dtype_)
+    #     # if self.W_fb is not None:
+    #     #     return self.W_fb
+    #     W_fb = torch.rand(self.n_reservoir_, self.n_reservoir_, dtype=self._dtype_, requires_grad=True)*2 - 1
+
+    #     self.W_fb_ = W_fb
+
+    #     # check_model_params(self.__dict__)
+    #     # X = self._scale_shift_inputs(X)
+    #     if self.input_scaling is not None:
+    #         if isinstance(self.input_scaling, (float, int)):
+    #             X = X * self.input_scaling
+    #         elif torch.is_tensor(self.input_scaling):
+    #             assert self.input_scaling.numel() == self.n_inputs_, "wrong input scaling"
+    #             X = X * self.input_scaling.view(1, -1)  # Ensure correct shape for broadcasting
+    #         else:
+    #             raise ValueError("wrong input scaling type")
+
+    #     if self.input_shift is not None:
+    #         if isinstance(self.input_shift, (float, int)):
+    #             X = X + self.input_shift
+    #         elif torch.is_tensor(self.input_shift):
+    #             assert self.input_shift.numel() == self.n_inputs_, "wrong input shift"
+    #             X = X + self.input_shift.view(1, -1)  # Ensure correct shape for broadcasting
+    #         else:
+    #             raise ValueError("wrong input shift type")
+
+    #     # Initialize reservoir model
+    #     self.reservoir_ = torch.tensor(reservoir_, dtype=self._dtype_, requires_grad=True)
+        
+
+    #     # Run "neuronal activity"
+    #     states = self.reservoir_.harvest_states(X, y, initial_state=None)
+
+    #     # Extend states matrix with inputs, except we only train based on states
+    #     if not self.fit_only_states:
+    #         full_states = torch.cat((states, X), dim=1)
+    #     else:
+    #         full_states = states        
+    #         self.full_states_ = full_states
+            
+    #     self.full_states_ = full_states
+
+    #     # Solve for W_out using full states and outputs, excluding transient
+    #     self.W_out_ = self._solve_W_out(
+    #         full_states[self.n_transient :, :], y[self.n_transient :, :]
+    #     )
+    #     # Predict on training set (including the pass through the output nonlinearity)
+    #     self.training_prediction_ = self.activation_out(torch.matmul(full_states, self.W_out_.t()))
+
+    #     # Store reservoir activity
+    #     if self.store_states_train:
+    #         self.states_train_ = states
+    #     return self
+    
+    
+    
+    # def predict(self, X: torch.Tensor) -> torch.Tensor:
+    #     check_is_fitted(self)
+
+    #     n_time_steps = X.size(0)
+
+    #     # Scale and shift inputs
+    #     X = self._scale_shift_inputs(X)
+
+    #     # Initialize predictions
+    #     states = np.zeros((n_time_steps, self.n_reservoir_), dtype=self._dtype_)
+    #     y_pred = np.zeros((n_time_steps, self.n_outputs_), dtype=self._dtype_)
+
+    #     # Go through samples (steps) and predict for each of them
+    #     for t in range(1, n_time_steps):
+    #         states[t, :] = self.reservoir_.update_state(
+    #             state_t=states[t - 1, :], X_t=X[t, :], y_t=y_pred[t - 1, :],
+    #         )
+
+    #         if self.fit_only_states:
+    #             full_states = states[t, :]
+    #         else:
+    #             full_states = np.concatenate([states[t, :], X[t, :]])
+    #         # Predict
+    #         y_pred[t, :] = torch.matmul(self.W_out_, full_states)
+
+    #     # Store reservoir activity
+    #     if self.store_states_pred:
+    #         self.states_pred_ = states
+
+    #     # Apply output non-linearity
+    #     return y_pred
